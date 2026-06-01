@@ -1,140 +1,98 @@
-# custody
+# custody — Claude Code context
 
-## Was ist custody?
+## What is custody?
 
-Partial-ownership manager für Config-Dateien die von Apps UND vom User verwaltet werden.
+Partial-ownership manager for config files shared between apps and the user.
+See `docs/concept.md` for the full concept and `docs/architecture.md` for
+design decisions.
 
-Das Kernproblem: Tools wie Sidebar, Claude Desktop, VS Code schreiben ihre Config-Dateien selbst. Chezmoi kann diese Dateien nicht vollständig verwalten ohne App-eigene Werte zu überschreiben. custody löst das: du deklarierst welche JSON-Pfade "dir gehören" (global auf allen Rechnern, oder nur lokal), der Rest gehört der App.
+**Goal:** FOSS release on PyPI as `custody`. Name is reserved.
+**GitHub:** https://github.com/i21aelbe/custody
 
-**Langfristiges Ziel:** FOSS-Veröffentlichung auf PyPI als `custody`. Name auf PyPI noch nicht reserviert — tun wenn bereit.
+## Replaces
 
-## Ersetzt
+`~/code/shell-tools/src/shell_tools/cz_partial_sync.py` — deleted once custody
+is production-ready. No code sharing during development; concepts and algorithms
+may be ported. Zero further investment in cz_partial_sync.
 
-`~/code/shell-tools/src/shell_tools/cz_partial_sync.py` — wird am Ende gelöscht wenn custody produktionsreif ist. Bis dahin: zero Aufwand in cz_partial_sync, kein Code-Sharing während Entwicklung. Konzepte und Algorithmen können übernommen werden.
+## Language
 
-## Kernkonzepte (aus cz_partial_sync geerbt und erweitert)
+All repo artifacts (code, comments, docs, commit messages, CLI text) must be
+in English. CLAUDE.md itself will be translated before the repo goes public.
 
-### Ownership-Modell
+## First concrete use case: Sidebar (macOS)
 
-Jeder JSON-Pfad (JSON Pointer, RFC 6901) hat genau einen Owner:
-
-| Quelle | Bedeutung |
-|--------|-----------|
-| `managed_global.json` | custody owned, alle Rechner |
-| `managed_<hostname>.json` | custody owned, nur dieser Rechner |
-| `ignored_paths` | App owned — nie anfassen |
-| (keines) | unklassifiziert → interaktiv fragen |
-
-### Phasen (Reihenfolge fix)
-
-1. **Phase 2A** — Drift in owned Pfaden: desired vs. target abweichend → fix + warn
-2. **Phase 2B** — Unklassifizierte Pfade im Target → interaktiver Adopt-Dialog
-3. **Phase 1** — Additive Sync: fehlende owned Pfade ins Target schreiben (nie überschreiben)
-
-### Merge-Semantik (global + hostname → desired)
-
-- JSON Object: rekursiv, hostname ergänzt/überschreibt global
-- JSON Array: Union (unique + sort)
-- Scalar: hostname überschreibt global
-
-### Interaktiver Dialog (Single-Keypress)
-
-Bei unklassifizierten Pfaden: global übernehmen / nur lokal / App überlassen / skip / abort.
-Skip-Persistenz: `.pending`-Datei → nächster Run fragt erneut.
-
-## Geplante Erweiterungen gegenüber cz_partial_sync
-
-### Pre/Post-Hooks
-
-Optionale Shell-Scripts pro Config-Subdir:
-- `pre_sync.sh` — vor dem Sync ausführen (z.B. App beenden)
-- `post_sync.sh` — nach dem Sync (z.B. App neu starten)
-
-Erster Use Case: Sidebar (Dock-Replacement für macOS) — muss vor dem Config-Write beendet und danach neu gestartet werden, weil er beim Quit seinen kompletten In-Memory-State zurückschreibt.
-
-### Schema-Validierung (mit Pydantic)
-
-Pro Config-Subdir: Pydantic-Modell das die erwartete Struktur der Zieldatei beschreibt.
-Vor jedem Sync: Validierung. Bei Mismatch → Warnung "App hat sein Format geändert, re-engineering nötig" statt blindes Schreiben.
-
-Pydantic ist ok hier (kein Symlink-Deployment-Problem wie bei cz_partial_sync — custody wird als echtes Package deployed).
-
-### Format-Adapter
-
-Zieldateien müssen nicht JSON sein. Adapter-Schicht für:
-- **Binary Plist** (macOS): Sidebar, viele andere Mac-Apps
-- JSON (Standard)
-- Weitere nach Bedarf
-
-Der Adapter konvertiert vor dem Sync zu JSON, danach zurück.
-
-### Chezmoi-Entkopplung
-
-cz_partial_sync ist tief mit chezmoi verknüpft (`_chezmoi_source_dir()`, onchange-Trigger).
-custody soll chezmoi-agnostisch sein — chezmoi ist ein optionaler Adapter, nicht Voraussetzung.
-
-## Erster konkreter Use Case: Sidebar (macOS)
-
-Sidebar ist ein Dock-Replacement das seine Config in einem Binary Plist speichert:
+Sidebar is a Dock replacement that stores its config in a Binary Plist:
 `~/Library/Preferences/at.sidebar.Sidebar.plist`
 
-### Empirisch ermittelte Rahmenbedingungen
+Key constraints (empirically verified):
+- Sidebar reads config **only at startup**
+- On quit, Sidebar writes its **full in-memory state** back → any external
+  changes are overwritten
+- No checksum/integrity check
+- **Sync window:** after quit (poll ~3s for writes to finish) and before restart
+- The Finder Extension process stays alive after quit and writes other keys
+  periodically (~every 2 min)
 
-- Sidebar liest Config **nur beim Start** (nicht während der Laufzeit)
-- Beim Quit schreibt Sidebar **kompletten In-Memory-State** zurück → externe Änderungen werden überschrieben
-- Kein Prüfsummen-/Integrity-Check
-- **Sync-Fenster:** nach Quit (Writes abwarten, ~3s polling) und vor Neustart
-- Finder-Extension-Prozess bleibt nach Quit aktiv, schreibt andere Keys periodisch (~alle 2 min)
+### Plist structure
 
-### Plist-Struktur
+Most values are JSON-encoded bytes inside the Binary Plist:
 
-Die meisten Werte sind JSON-Bytes innerhalb des Binary Plist:
-
-| Key | Typ | Sync |
-|-----|-----|------|
-| `sidebarStyle` | JSON list (pro Display ein Eintrag) | global + display-spezifisch |
-| `applicationConfigurations` | JSON list (139 Apps) | global |
+| Key | Type | Sync |
+|-----|------|------|
+| `sidebarStyle` | JSON list (one entry per display) | global + display-specific |
+| `applicationConfigurations` | JSON list (139 apps) | global |
 | `linkConfigurations` | JSON list | global |
 | `smartStackConfigurations` | JSON list | global |
 | `stackConfigurations` | JSON list | global |
 | `spacerConfigurations` | JSON list | global |
 | `launcherConfigurations` | JSON list | global |
 | `KeyboardShortcuts_*` | string (JSON) | global |
-| `sidebarSettings` | bytes (encrypted, License) | **nie anfassen** |
+| `sidebarSettings` | bytes (encrypted, License) | **never touch** |
 | `applicationStatistics` | JSON dict | app-owned (runtime) |
 | `applicationWindowOrders` | JSON dict | app-owned (runtime) |
 | `recentlyClosedApps` | JSON list | app-owned (runtime) |
 | `hints` | JSON list | app-owned (runtime) |
 | `NSWindow Frame *` | string | app-owned (ui-state) |
-| `at.sidebar.Sidebar.tabWindow.size.*` | dict | app-owned (display-spezifisch) |
+| `at.sidebar.Sidebar.tabWindow.size.*` | dict | app-owned (display-specific) |
 
-### sidebarStyle — Besonderheit
+### sidebarStyle — special case
 
-Liste von Style-Einträgen, einer pro Display:
-- `displayId: null` → Default (alle unbekannten Screens)
-- `displayId: "UUID"` → Override für spezifischen Monitor
+List of style entries, one per display:
+- `displayId: null` → default for all unknown screens
+- `displayId: "UUID"` → override for a specific monitor
 
-Jeder Eintrag hat ~110 Felder (vollständig, keine Vererbung). Display-UUIDs kommen aus dem
-macOS IOKit/EDID — stabil pro physischem Monitor, unabhängig vom Rechner.
+Each entry has ~110 fields (complete, no inheritance). Display UUIDs come from
+macOS IOKit/EDID — stable per physical monitor across machines.
 
-**Offene Frage:** Verhält sich `displayId: null` als Fallback für unbekannte Displays in
-"Individual"-Modus, oder bekommen unbekannte Displays Factory-Defaults? Nicht empirisch
-verifiziert — der Test wurde noch nicht durchgeführt.
+**Open question:** Does `displayId: null` act as a fallback in "Individual"
+mode, or do unknown displays get factory defaults? Not empirically verified.
 
-**Universal Control Artefakt:** Der macOS windowserver-Plist enthält Display-UUIDs von
-via UC erreichbaren Monitoren anderer Macs — kein verlässlicher Source für "physisch
-angeschlossene Displays dieser Maschine".
+**Universal Control artefact:** The macOS windowserver plist contains display
+UUIDs from monitors reachable via UC from other Macs — not a reliable source
+for "physically connected displays on this machine".
 
-## Deployment-Ziel
+## Implementation status
 
+Done and tested:
+- `segments.py` — PathSegments, parse_pointer, walk (arrays atomic)
+- `merge.py` — smart_merge, merge_by_key (with None-identity sentinel fix)
+- `expressions.py` — JSON Pointer + JSON Path dispatch via jsonpath-ng
+- `ownership.py` — Chain of Responsibility (IgnoredPathsHandler, ManagedDocHandler)
+- `engine.py` — Phase 2A (drift), 2B (unknown), Phase 1 (additive)
+
+Planned next:
+- `config.py` — read a custody config subdir from disk
+- `adapters/` — JSON adapter, Binary Plist adapter
+- `schema.py` — generate, validate, x-merge-key extraction
+- `cli.py` — `custody sync`, `custody init`, `custody migrate`
+
+## Deployment
+
+```sh
+uv tool install custody   # installs binary into system
+custody sync              # runs sync for all configured targets
 ```
-uv tool install custody        # installiert Binary ins System
-custody sync                   # führt Sync für alle konfigurierten Targets aus
-```
 
-Kein Symlink-Deployment, kein venv-Bewusstsein beim Aufrufer nötig.
-chezmoi-Trigger optional: `run_onchange_after_custody.sh.tmpl`
-
-## Repository
-
-GitHub: https://github.com/i21aelbe/custody
+No symlink deployment. chezmoi trigger optional via
+`run_onchange_after_custody.sh.tmpl`.

@@ -7,7 +7,10 @@ authors = [
     { name = "Michael Ebert", email = "ebe@gmx.de" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "jsonpath-ng>=1.8.0",
+    "jsonpointer>=3.1.1",
+]
 
 [project.scripts]
 custody = "custody.cli:main"
@@ -15,3 +18,8 @@ custody = "custody.cli:main"
 [build-system]
 requires = ["uv_build>=0.11.17,<0.12.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
