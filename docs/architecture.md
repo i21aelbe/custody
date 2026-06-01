@@ -245,8 +245,18 @@ When a schema check fails after an app update, `custody migrate <name>`:
 
 ## Format adapters — planned
 
-Target files are not always JSON. The adapter layer converts between the
-on-disk format and in-memory Python dicts before/after sync.
+### Engine is format-agnostic
+
+The sync engine (`engine.py`), merge logic (`merge.py`), ownership chain
+(`ownership.py`), and path operations (`segments.py`) work exclusively on
+Python types (`dict`, `list`, `str`, `int`, `float`, `bool`, `None`). They
+make no assumptions about serialisation format. A dict is a dict whether it
+was loaded from JSON, YAML, TOML, or a Binary Plist.
+
+This is a deliberate constraint. Adding a new format = adding an adapter.
+No engine code changes.
+
+### Adapter protocol
 
 ```python
 class Adapter(Protocol):
@@ -254,18 +264,65 @@ class Adapter(Protocol):
     def save(self, path: Path, doc: Any) -> None: ...
 ```
 
-| Adapter | File type | Notes |
+Two `load`/`save` pairs are needed per config subdir:
+1. **Target adapter** — loads the app's config file; saves the merged result back
+2. **Managed doc adapter** — loads `managed_global.xxx` and `managed_<host>.xxx`
+
+In most cases both use the same adapter (same format). Exception: binary formats
+(see below).
+
+### managed_global format matches the target
+
+`managed_global.xxx` is a structural subset of the target — it mirrors the
+target's format so values can be copy-pasted directly. If the target is YAML,
+`managed_global.yaml` is YAML. If the target is JSON, `managed_global.json`
+is JSON.
+
+This keeps the authoring workflow frictionless: inspect the target, copy the
+paths you want to own, paste into `managed_global.xxx`. No format translation.
+
+### Comment preservation
+
+Comments in config files have different status depending on the file:
+
+**In the target** — comments were written by the user or the app and must be
+preserved. The target adapter's `save()` must round-trip comments.
+
+**In managed_global / managed_local** — comments are written by the custody
+user to document ownership decisions (e.g. `# needed for MCP server`).
+When Phase 2B adopts a new path and writes it into `managed_global.yaml`,
+all existing comments in that file must be preserved. This is a correctness
+requirement, not a nice-to-have: losing comments on the first adoption would
+make YAML managed files unusable in practice.
+
+Both target and managed file adapters must therefore support comment-preserving
+round-trips. For YAML this requires `ruamel.yaml` — `pyyaml` is lossy and
+not acceptable for either use.
+
+**Comments are not propagated** from managed files into the target. There is
+no "this value came from managed_global" annotation written into the target —
+custody writes values only, not provenance metadata.
+
+### Planned adapters
+
+| Adapter | Format | Notes |
 |---|---|---|
-| `JsonAdapter` | `.json` | default |
-| `PlistAdapter` | `.plist` | macOS Binary Plist; plist values may be JSON-encoded bytes |
+| `JsonAdapter` | JSON | default |
+| `PlistAdapter` | Binary Plist | macOS; inner JSON-encoded byte values decoded |
+| `YamlAdapter` | YAML | `ruamel.yaml` required (pyyaml is lossy — drops comments) |
+| `TomlAdapter` | TOML | future |
 
-The `adapter` file in the config subdir selects the adapter (`"json"` or
-`"plist"`). Default: `"json"`.
+### Binary formats: managed files stay human-writable
 
-**Binary Plist + JSON-encoded bytes (Sidebar)**
-Sidebar stores most configuration as JSON-encoded bytes within a Binary Plist.
-The `PlistAdapter` must decode these inner JSON values before presenting the
-document to the engine, and re-encode them on write.
+For binary formats (Plist, SQLite, etc.), `managed_global.xxx` cannot mirror
+the binary format — it would be uneditable. Instead, managed files use JSON
+(the logical structure after decoding). The PlistAdapter decodes the binary
+plist and its inner JSON-encoded byte values into a plain Python dict; the
+engine and managed files see only that dict.
+
+Example: Sidebar's Binary Plist contains keys whose values are JSON-encoded
+bytes. The PlistAdapter decodes these transparently. `managed_global.json`
+contains the decoded structure. On save, the adapter re-encodes to Binary Plist.
 
 ---
 
