@@ -43,10 +43,12 @@ def getch() -> str:
     return ch
 
 
-_RED   = "\033[31m"
-_GREEN = "\033[32m"
-_CYAN  = "\033[36m"
-_RESET = "\033[0m"
+_RED    = "\033[31m"
+_GREEN  = "\033[32m"
+_YELLOW = "\033[33m"
+_CYAN   = "\033[36m"
+_BOLD   = "\033[1m"
+_RESET  = "\033[0m"
 
 def _supports_color() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
@@ -70,7 +72,9 @@ def show_diff(
         _to_lines(before), _to_lines(after),
         fromfile=before_label, tofile=after_label,
     ):
-        if not show_header and (line.startswith("--- ") or line.startswith("+++ ")):
+        if not show_header and (
+            line.startswith("--- ") or line.startswith("+++ ") or line.startswith("@@")
+        ):
             continue
         if color:
             if line.startswith("+") and not line.startswith("+++"):
@@ -123,13 +127,19 @@ def ask_unknown_path(
     Raises Abort or _Skip.
     """
     pointer = to_pointer(path)
-    print(f"\n  Unknown: {pointer}")
+    if _supports_color():
+        header = f"  {_BOLD}{_YELLOW}Unknown:{_RESET} {_BOLD}{pointer}{_RESET}"
+    else:
+        header = f"  Unknown: {pointer}"
+    print(f"\n{header}")
+    print()
     target_without = delete_at(target_doc, path)
     show_diff(
         _context_subtree(target_without, path),
         _context_subtree(target_doc, path),
         show_header=False,
     )
+    print()
     print()
     print(f"  [g] adopt globally  — managed_global.json (all machines)")
     print(f"  [l] adopt locally   — managed_{hostname}.json (this machine)")

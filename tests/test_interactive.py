@@ -120,6 +120,7 @@ class TestAskUnknownPath:
         out = capsys.readouterr().out
         assert "--- " not in out
         assert "+++ " not in out
+        assert "@@" not in out
 
 
 # ---------------------------------------------------------------------------
