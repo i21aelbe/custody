@@ -122,6 +122,35 @@ class TestAskUnknownPath:
         assert "+++ " not in out
         assert "@@" not in out
 
+    def test_recurse_option_not_shown_for_scalar(self, capsys):
+        with patch("custody.interactive.getch", return_value="1"):
+            ask_unknown_path(("k",), "scalar", {"k": "scalar"}, "testhost")
+        out = capsys.readouterr().out
+        assert "[r]" not in out
+
+
+class TestAskUnknownPathDict:
+    _target = {"config": {"theme": "dark", "size": 12}}
+    _value = {"theme": "dark", "size": 12}
+
+    def _run(self, keys):
+        with patch("custody.interactive.getch", side_effect=iter(keys)):
+            return ask_unknown_path(("config",), self._value, self._target, "testhost")
+
+    def test_returns_4_for_recurse(self):
+        assert self._run(["r"]) == "r"
+
+    def test_recurse_option_shown_for_dict(self, capsys):
+        self._run(["r"])
+        out = capsys.readouterr().out
+        assert "[r]" in out
+        assert "recurse" in out.lower()
+
+    def test_4_invalid_for_scalar_then_accepts_1(self, capsys):
+        with patch("custody.interactive.getch", side_effect=iter(["r", "1"])):
+            result = ask_unknown_path(("k",), "scalar", {"k": "scalar"}, "testhost")
+        assert result == "1"
+
 
 # ---------------------------------------------------------------------------
 # write_managed / write_ignored / write_pending
@@ -247,3 +276,11 @@ class TestBuildAdoptCallback:
             cb = build_adopt_callback(config, pm, "myhostname")
             with pytest.raises(Abort):
                 cb(("k",), "v", {"k": "v"})
+
+    def test_recurse_returns_recurse_resolution(self, config, pm):
+        dict_value = {"a": 1}
+        with patch("custody.interactive.getch", return_value="r"):
+            cb = build_adopt_callback(config, pm, "myhostname")
+            resolution = cb(("nested",), dict_value, {"nested": dict_value})
+        assert resolution is not None
+        assert resolution.kind == SourceKind.RECURSE

@@ -124,6 +124,92 @@ class TestPhase2B:
         assert ("runtime", "pid") not in unknown
 
 
+class TestPhase2BDict:
+    """Phase 2B behaviour for dict-valued unknown paths."""
+
+    def test_entirely_unknown_dict_presented_to_callback(self):
+        # No child of "config" is managed → present the dict path, not the leaves
+        target = {"config": {"a": 1, "b": 2}}
+        chain = make_chain({}, target=target)
+        seen = []
+
+        def callback(path, value, target_doc):
+            seen.append(path)
+            return None  # defer
+
+        run_phase_2b(target, chain, callback)
+        assert ("config",) in seen
+        assert ("config", "a") not in seen
+        assert ("config", "b") not in seen
+
+    def test_defer_dict_records_dict_path_not_leaves(self):
+        target = {"config": {"a": 1}}
+        chain = make_chain({}, target=target)
+        _, unknown = run_phase_2b(target, chain, lambda p, v, t: None)
+        assert ("config",) in unknown
+        assert ("config", "a") not in unknown
+
+    def test_recurse_walks_children(self):
+        target = {"config": {"a": 1, "b": 2}}
+        chain = make_chain({}, target=target)
+
+        def callback(path, value, target_doc):
+            if path == ("config",):
+                return Resolution(SourceKind.RECURSE, value, "recurse")
+            return None  # defer individual leaves
+
+        _, unknown = run_phase_2b(target, chain, callback)
+        assert ("config",) not in unknown
+        assert ("config", "a") in unknown
+        assert ("config", "b") in unknown
+
+    def test_adopt_whole_dict(self):
+        target = {"config": {"a": 1}}
+        chain = make_chain({}, target=target)
+
+        def callback(path, value, target_doc):
+            return Resolution(SourceKind.WRITE, {"a": 99}, "user")
+
+        new_target, unknown = run_phase_2b(target, chain, callback)
+        assert new_target["config"]["a"] == 99
+        assert unknown == []
+
+    def test_partially_classified_dict_recurses_automatically(self):
+        # ("config", "a") is managed, ("config", "b") is unknown
+        # The dict ("config",) should NOT be presented — only the unknown leaf
+        target = {"config": {"a": 1, "b": 2}}
+        chain = make_chain({"config": {"a": 1}}, target=target)
+        seen = []
+
+        def callback(path, value, target_doc):
+            seen.append(path)
+            return None
+
+        run_phase_2b(target, chain, callback)
+        assert ("config",) not in seen
+        assert ("config", "b") in seen
+
+    def test_noninteractive_recurses_into_unknown_dict(self):
+        # Non-interactive: always recurse, collect leaf unknowns
+        target = {"config": {"a": 1, "b": 2}}
+        chain = make_chain({}, target=target)
+        _, unknown = run_phase_2b(target, chain, adopt_callback=None)
+        assert ("config", "a") in unknown
+        assert ("config", "b") in unknown
+        assert ("config",) not in unknown
+
+    def test_ignore_whole_dict_not_in_unknown(self):
+        target = {"config": {"a": 1}}
+        chain = make_chain({}, target=target)
+
+        def callback(path, value, target_doc):
+            return Resolution(SourceKind.PASSTHROUGH, value, "ignored")
+
+        _, unknown = run_phase_2b(target, chain, callback)
+        assert ("config",) not in unknown
+        assert ("config", "a") not in unknown
+
+
 class TestPhase1:
     def test_inserts_missing_key(self):
         target = {"other": "x"}

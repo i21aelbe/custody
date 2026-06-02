@@ -27,6 +27,7 @@ from custody.segments import PathSegments, get_at, is_prefix, leaf_paths
 class SourceKind(Enum):
     WRITE = auto()        # custody owns and writes the desired value
     PASSTHROUGH = auto()  # custody acknowledges but never modifies (ignored)
+    RECURSE = auto()      # descend into children (user deferred the whole-dict decision)
 
 
 @dataclass

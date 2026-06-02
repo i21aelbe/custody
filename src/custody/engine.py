@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from custody.ownership import OwnershipChain, Resolution, SourceKind
-from custody.segments import PathSegments, get_at, leaf_paths, set_at, walk
+from custody.segments import PathSegments, get_at, leaf_paths, set_at
 
 
 @dataclass
@@ -75,6 +75,79 @@ def run_phase_2a(
     return target, fixed
 
 
+def _has_any_classified_descendant(
+    doc: Any,
+    base: PathSegments,
+    target: Any,
+    chain: OwnershipChain,
+) -> bool:
+    """Return True if any leaf path within doc is classified by the chain."""
+    if not isinstance(doc, dict) or not doc:
+        return chain.resolve(base, target) is not None
+    return any(
+        _has_any_classified_descendant(val, base + (key,), target, chain)
+        for key, val in doc.items()
+    )
+
+
+def _classify_doc(
+    doc: Any,
+    base: PathSegments,
+    target: Any,
+    chain: OwnershipChain,
+    adopt_callback: AdoptCallback | None,
+    unknown: list[PathSegments],
+) -> Any:
+    """Recursively classify unknown paths in doc, starting from base.
+
+    For entirely-unclassified dict paths (no child is managed):
+      - Interactive: present to user with adopt/ignore/recurse options.
+      - Non-interactive: recurse automatically, collect leaf unknowns.
+
+    For partially-classified dict paths (some children already managed):
+      - Always recurse — only ask about the unclassified children.
+    """
+    if not isinstance(doc, dict):
+        return target
+    for key, value in doc.items():
+        path = base + (key,)
+        if chain.resolve(path, target) is not None:
+            continue  # already classified
+
+        if isinstance(value, dict) and value:
+            entirely_unknown = not _has_any_classified_descendant(
+                value, path, target, chain
+            )
+            if entirely_unknown and adopt_callback is not None:
+                resolution = adopt_callback(path, value, target)
+                if resolution is None:
+                    unknown.append(path)  # deferred — skip subtree
+                elif resolution.kind == SourceKind.WRITE:
+                    target = set_at(target, path, resolution.desired)
+                elif resolution.kind == SourceKind.RECURSE:
+                    target = _classify_doc(
+                        value, path, target, chain, adopt_callback, unknown
+                    )
+                # PASSTHROUGH: ignored — skip subtree, not unknown
+            else:
+                # Partially classified, or non-interactive: recurse
+                target = _classify_doc(
+                    value, path, target, chain, adopt_callback, unknown
+                )
+        else:
+            # Leaf: scalar, list, or empty dict
+            if adopt_callback is None:
+                unknown.append(path)
+            else:
+                resolution = adopt_callback(path, value, target)
+                if resolution is None:
+                    unknown.append(path)
+                elif resolution.kind == SourceKind.WRITE:
+                    target = set_at(target, path, resolution.desired)
+                # PASSTHROUGH: ignored — not unknown
+    return target
+
+
 def run_phase_2b(
     target: Any,
     chain: OwnershipChain,
@@ -82,30 +155,15 @@ def run_phase_2b(
 ) -> tuple[Any, list[PathSegments]]:
     """Classify unknown paths via the adopt callback.
 
-    Walks the target document and calls adopt_callback for each unclassified
-    path. If the callback returns a Resolution, the handler's desired value is
-    written; if it returns None, the path is recorded as still unknown.
+    For entirely-unclassified dict-valued paths the callback may return
+    RECURSE to descend into children, WRITE to adopt the whole subtree,
+    PASSTHROUGH to ignore it, or None to defer.
 
-    If adopt_callback is None (non-interactive run), all unknown paths are
-    recorded without prompting.
+    Non-interactive runs (adopt_callback=None) always recurse into dicts
+    and collect every unknown leaf path.
     """
     unknown: list[PathSegments] = []
-
-    for path, current_value in walk(target):
-        if not path:
-            continue
-        if isinstance(current_value, dict) and current_value:
-            continue  # intermediate dict — its leaf children are walked separately
-        if chain.resolve(path, target) is not None:
-            continue  # already classified
-
-        if adopt_callback is not None:
-            resolution = adopt_callback(path, current_value, target)
-            if resolution is not None and resolution.kind == SourceKind.WRITE:
-                target = set_at(target, path, resolution.desired)
-                continue
-        unknown.append(path)
-
+    target = _classify_doc(target, (), target, chain, adopt_callback, unknown)
     return target, unknown
 
 

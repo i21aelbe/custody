@@ -124,9 +124,11 @@ def ask_unknown_path(
     Diffs target-without-key → target so only the unknown key appears
     green (+) in its surrounding context. No other keys are highlighted.
 
-    Returns '1' (global), '2' (local), or '3' (ignore).
+    For dict-valued paths, also offers [4] recurse to decide on sub-keys.
+    Returns '1' (global), '2' (local), '3' (ignore), or '4' (recurse).
     Raises Abort or _Skip.
     """
+    is_subdict = isinstance(value, dict) and bool(value)
     pointer = to_pointer(path)
     if _supports_color():
         header = f"  {_BOLD}{_YELLOW}Unknown:{_RESET} {_BOLD}{pointer}{_RESET}"
@@ -146,20 +148,23 @@ def ask_unknown_path(
     print(f"  [2] adopt locally   — managed_{hostname}.json (this machine)")
     print( "  [3] ignore          — add to ignored_paths (app-owned)")
     print()
+    if is_subdict:
+        print("  [r] recurse         — decide on sub-keys individually")
     print( "  [s] skip            — ask again next run")
     print( "  [a] abort           — stop sync")
 
-    print(f"\n  [1/2/3/s/a]: ", end="", flush=True)
+    valid = ("1", "2", "3", "r") if is_subdict else ("1", "2", "3")
+    print(f"\n  [{'/'.join(valid)}/s/a]: ", end="", flush=True)
     while True:
         ch = getch().lower()
         if ch == "a":
             print("a")
             raise Abort()
         if ch == "s":
-            print("s")
+            print("s\n")  # extra blank lines before next Unknown block
             raise _Skip()
-        if ch in ("1", "2", "3"):
-            print(ch)
+        if ch in valid:
+            print(f"{ch}\n")  # extra blank lines before next Unknown block
             return ch
         print("\x07", end="", flush=True)  # bell on invalid key
 
@@ -192,8 +197,11 @@ def build_adopt_callback(config: ConfigTarget, pm, hostname: str) -> AdoptCallba
             )
             return Resolution(SourceKind.WRITE, current_value, f"managed_{scope}")
 
-        else:  # "3" ignore
-            write_ignored(config, path)
-            return Resolution(SourceKind.PASSTHROUGH, current_value, "ignored")
+        if choice == "r":
+            return Resolution(SourceKind.RECURSE, current_value, "recurse")
+
+        # "3" ignore
+        write_ignored(config, path)
+        return Resolution(SourceKind.PASSTHROUGH, current_value, "ignored")
 
     return callback
