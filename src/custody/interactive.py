@@ -65,7 +65,8 @@ def show_diff(
     def _to_lines(v: Any) -> list[str]:
         if v is None:
             return ["(absent)\n"]
-        return json.dumps(v, indent=2, ensure_ascii=False).splitlines(keepends=True)
+        text = json.dumps(v, indent=2, ensure_ascii=False)
+        return (text + "\n").splitlines(keepends=True)
 
     color = _supports_color()
     for line in difflib.unified_diff(
@@ -123,7 +124,7 @@ def ask_unknown_path(
     Diffs target-without-key → target so only the unknown key appears
     green (+) in its surrounding context. No other keys are highlighted.
 
-    Returns 'g' (global), 'l' (local), or 'i' (ignore).
+    Returns '1' (global), '2' (local), or '3' (ignore).
     Raises Abort or _Skip.
     """
     pointer = to_pointer(path)
@@ -141,13 +142,14 @@ def ask_unknown_path(
     )
     print()
     print()
-    print(f"  [g] adopt globally  — managed_global.json (all machines)")
-    print(f"  [l] adopt locally   — managed_{hostname}.json (this machine)")
-    print( "  [i] ignore          — add to ignored_paths (app-owned)")
+    print(f"  [1] adopt globally  — managed_global.json (all machines)")
+    print(f"  [2] adopt locally   — managed_{hostname}.json (this machine)")
+    print( "  [3] ignore          — add to ignored_paths (app-owned)")
+    print()
     print( "  [s] skip            — ask again next run")
     print( "  [a] abort           — stop sync")
 
-    print(f"\n  [g/l/i/s/a]: ", end="", flush=True)
+    print(f"\n  [1/2/3/s/a]: ", end="", flush=True)
     while True:
         ch = getch().lower()
         if ch == "a":
@@ -156,7 +158,7 @@ def ask_unknown_path(
         if ch == "s":
             print("s")
             raise _Skip()
-        if ch in ("g", "l", "i"):
+        if ch in ("1", "2", "3"):
             print(ch)
             return ch
         print("\x07", end="", flush=True)  # bell on invalid key
@@ -180,8 +182,8 @@ def build_adopt_callback(config: ConfigTarget, pm, hostname: str) -> AdoptCallba
         except _Skip:
             return None
 
-        if choice in ("g", "l"):
-            scope = "global" if choice == "g" else hostname
+        if choice in ("1", "2"):
+            scope = "global" if choice == "1" else hostname
             file_path = write_managed(config, scope, path, current_value)
             pm.hook.after_managed_file_written(
                 config_name=config.name,
@@ -190,7 +192,7 @@ def build_adopt_callback(config: ConfigTarget, pm, hostname: str) -> AdoptCallba
             )
             return Resolution(SourceKind.WRITE, current_value, f"managed_{scope}")
 
-        else:  # ignore
+        else:  # "3" ignore
             write_ignored(config, path)
             return Resolution(SourceKind.PASSTHROUGH, current_value, "ignored")
 

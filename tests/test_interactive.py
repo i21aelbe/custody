@@ -79,14 +79,14 @@ class TestAskUnknownPath:
                 self._target, "testhost",
             )
 
-    def test_returns_g_for_global(self, capsys):
-        assert self._run(["g"]) == "g"
+    def test_returns_1_for_global(self, capsys):
+        assert self._run(["1"]) == "1"
 
-    def test_returns_l_for_local(self, capsys):
-        assert self._run(["l"]) == "l"
+    def test_returns_2_for_local(self, capsys):
+        assert self._run(["2"]) == "2"
 
-    def test_returns_i_for_ignore(self, capsys):
-        assert self._run(["i"]) == "i"
+    def test_returns_3_for_ignore(self, capsys):
+        assert self._run(["3"]) == "3"
 
     def test_raises_abort_for_a(self):
         with patch("custody.interactive.getch", return_value="a"):
@@ -99,16 +99,16 @@ class TestAskUnknownPath:
                 ask_unknown_path(("k",), "v", {"k": "v"}, "testhost")
 
     def test_bell_on_invalid_then_accepts_valid(self, capsys):
-        assert self._run(["x", "y", "g"]) == "g"
+        assert self._run(["x", "y", "1"]) == "1"
 
     def test_shows_diff_in_output(self, capsys):
-        self._run(["g"])
+        self._run(["1"])
         out = capsys.readouterr().out
         assert "theme" in out  # unknown key appears as + in diff
 
     def test_only_unknown_key_is_addition(self, capsys):
         # "other" is in both target_with and target_without, so it's context, not +
-        self._run(["g"])
+        self._run(["1"])
         out = capsys.readouterr().out
         lines = out.splitlines()
         plus_lines = [l for l in lines if l.strip().startswith("+")]
@@ -116,7 +116,7 @@ class TestAskUnknownPath:
         assert not any("other" in l for l in plus_lines)
 
     def test_no_file_header_in_output(self, capsys):
-        self._run(["g"])
+        self._run(["1"])
         out = capsys.readouterr().out
         assert "--- " not in out
         assert "+++ " not in out
@@ -192,7 +192,7 @@ class TestWritePending:
 
 class TestBuildAdoptCallback:
     def test_global_adoption_writes_managed_global(self, config, pm):
-        with patch("custody.interactive.getch", return_value="g"):
+        with patch("custody.interactive.getch", return_value="1"):
             cb = build_adopt_callback(config, pm, "myhostname")
             resolution = cb(("theme",), "dark", {"theme": "dark"})
 
@@ -203,7 +203,7 @@ class TestBuildAdoptCallback:
         assert doc["theme"] == "dark"
 
     def test_global_adoption_fires_hook(self, config, pm):
-        with patch("custody.interactive.getch", return_value="g"):
+        with patch("custody.interactive.getch", return_value="1"):
             cb = build_adopt_callback(config, pm, "myhostname")
             cb(("theme",), "dark", {"theme": "dark"})
 
@@ -212,7 +212,7 @@ class TestBuildAdoptCallback:
         assert pm.calls[0]["config_name"] == "myapp"
 
     def test_local_adoption_writes_managed_hostname(self, config, pm):
-        with patch("custody.interactive.getch", return_value="l"):
+        with patch("custody.interactive.getch", return_value="2"):
             cb = build_adopt_callback(config, pm, "myhostname")
             cb(("fontSize",), 14, {"fontSize": 14})
 
@@ -220,14 +220,14 @@ class TestBuildAdoptCallback:
         assert doc["fontSize"] == 14
 
     def test_local_adoption_fires_hook_with_hostname_scope(self, config, pm):
-        with patch("custody.interactive.getch", return_value="l"):
+        with patch("custody.interactive.getch", return_value="2"):
             cb = build_adopt_callback(config, pm, "myhostname")
             cb(("k",), "v", {"k": "v"})
 
         assert pm.calls[0]["scope"] == "myhostname"
 
     def test_ignore_writes_ignored_paths(self, config, pm):
-        with patch("custody.interactive.getch", return_value="i"):
+        with patch("custody.interactive.getch", return_value="3"):
             cb = build_adopt_callback(config, pm, "myhostname")
             resolution = cb(("runtime",), {"x": 1}, {"runtime": {"x": 1}})
 
