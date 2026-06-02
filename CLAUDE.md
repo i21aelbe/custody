@@ -1,5 +1,18 @@
 # custody — Claude Code context
 
+> **Note:** This file is context for the [Claude Code](https://claude.ai/code)
+> AI assistant and is not project documentation. It contains development
+> context, session continuity notes, and implementation status that helps
+> Claude Code understand the project across sessions.
+>
+> For project documentation see `README.md`, `docs/concept.md`, and
+> `docs/architecture.md`.
+>
+> **Open question:** Whether this file stays in the public repo long-term is
+> undecided. Options: keep it (useful for contributors using Claude Code),
+> or move to `.gitignore` (purely internal). Decision deferred until the repo
+> goes public.
+
 ## What is custody?
 
 Partial-ownership manager for config files shared between apps and the user.
