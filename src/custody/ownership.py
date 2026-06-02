@@ -107,7 +107,10 @@ class ManagedDocHandler:
 
     def handle(self, request: PathRequest) -> Resolution | None:
         if any(is_prefix(root, request.path) for root in self._roots):
-            desired = get_at(self._doc, request.path)
+            try:
+                desired = get_at(self._doc, request.path)
+            except (KeyError, TypeError):
+                return None  # ancestor is owned but this exact path isn't in the doc
             return Resolution(SourceKind.WRITE, desired, self.name)
         return None
 

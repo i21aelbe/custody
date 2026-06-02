@@ -34,9 +34,9 @@ class SyncResult:
     unknown: list[PathSegments] = field(default_factory=list)
 
 
-# Signature: (path, current_value) → Resolution | None
-# Return a Resolution to adopt the path, None to defer (recorded as unknown).
-AdoptCallback = Callable[[PathSegments, Any], Resolution | None]
+# Signature: (path, current_value, current_target_doc) → Resolution | None
+# Return a Resolution to adopt the path, None to skip (recorded as unknown).
+AdoptCallback = Callable[[PathSegments, Any, Any], Resolution | None]
 
 
 def _owned_write_paths(chain: OwnershipChain, doc: Any, target_doc: Any) -> list[tuple[PathSegments, Resolution]]:
@@ -94,11 +94,13 @@ def run_phase_2b(
     for path, current_value in walk(target):
         if not path:
             continue
+        if isinstance(current_value, dict) and current_value:
+            continue  # intermediate dict — its leaf children are walked separately
         if chain.resolve(path, target) is not None:
             continue  # already classified
 
         if adopt_callback is not None:
-            resolution = adopt_callback(path, current_value)
+            resolution = adopt_callback(path, current_value, target)
             if resolution is not None and resolution.kind == SourceKind.WRITE:
                 target = set_at(target, path, resolution.desired)
                 continue

@@ -96,9 +96,9 @@ class TestPhase2B:
         chain = make_chain({"theme": "dark"}, target=target)
         seen = []
 
-        def callback(path, value):
+        def callback(path, value, target_doc):
             seen.append((path, value))
-            return None  # defer
+            return None  # skip
 
         run_phase_2b(target, chain, adopt_callback=callback)
         assert ("new_key",) in [p for p, _ in seen]
@@ -107,7 +107,7 @@ class TestPhase2B:
         target = {"theme": "dark", "new_key": "old"}
         chain = make_chain({"theme": "dark"}, target=target)
 
-        def callback(path, value):
+        def callback(path, value, target_doc):
             if path == ("new_key",):
                 return Resolution(SourceKind.WRITE, "new_value", "user")
             return None
