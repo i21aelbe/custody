@@ -70,14 +70,13 @@ def pm():
 
 class TestAskUnknownPath:
     _target = {"preferences": {"theme": "light", "other": 1}}
-    _desired = {"preferences": {"other": 1}}
 
     def _run(self, keys):
         key_iter = iter(keys)
         with patch("custody.interactive.getch", side_effect=key_iter):
             return ask_unknown_path(
                 ("preferences", "theme"), "light",
-                self._target, self._desired, "testhost",
+                self._target, "testhost",
             )
 
     def test_returns_g_for_global(self, capsys):
@@ -92,12 +91,12 @@ class TestAskUnknownPath:
     def test_raises_abort_for_a(self):
         with patch("custody.interactive.getch", return_value="a"):
             with pytest.raises(Abort):
-                ask_unknown_path(("k",), "v", {}, {}, "testhost")
+                ask_unknown_path(("k",), "v", {"k": "v"}, "testhost")
 
     def test_raises_skip_for_s(self):
         with patch("custody.interactive.getch", return_value="s"):
             with pytest.raises(_Skip):
-                ask_unknown_path(("k",), "v", {}, {}, "testhost")
+                ask_unknown_path(("k",), "v", {"k": "v"}, "testhost")
 
     def test_bell_on_invalid_then_accepts_valid(self, capsys):
         assert self._run(["x", "y", "g"]) == "g"
@@ -105,7 +104,22 @@ class TestAskUnknownPath:
     def test_shows_diff_in_output(self, capsys):
         self._run(["g"])
         out = capsys.readouterr().out
-        assert "theme" in out  # unknown key appears in diff output
+        assert "theme" in out  # unknown key appears as + in diff
+
+    def test_only_unknown_key_is_addition(self, capsys):
+        # "other" is in both target_with and target_without, so it's context, not +
+        self._run(["g"])
+        out = capsys.readouterr().out
+        lines = out.splitlines()
+        plus_lines = [l for l in lines if l.strip().startswith("+")]
+        assert any("theme" in l for l in plus_lines)
+        assert not any("other" in l for l in plus_lines)
+
+    def test_no_file_header_in_output(self, capsys):
+        self._run(["g"])
+        out = capsys.readouterr().out
+        assert "--- " not in out
+        assert "+++ " not in out
 
 
 # ---------------------------------------------------------------------------

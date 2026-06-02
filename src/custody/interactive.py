@@ -14,9 +14,8 @@ from typing import Any
 
 from custody.config import ConfigTarget, write_ignored, write_managed
 from custody.engine import AdoptCallback
-from custody.merge import smart_merge
 from custody.ownership import Resolution, SourceKind
-from custody.segments import PathSegments, get_at, to_pointer
+from custody.segments import PathSegments, delete_at, get_at, to_pointer
 
 
 class Abort(Exception):
@@ -53,7 +52,13 @@ def _supports_color() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
-def show_diff(before: Any, after: Any, before_label: str = "managed", after_label: str = "target") -> None:
+def show_diff(
+    before: Any,
+    after: Any,
+    before_label: str = "managed",
+    after_label: str = "target",
+    show_header: bool = True,
+) -> None:
     """Print a colored unified diff between two JSON-serialisable values."""
     def _to_lines(v: Any) -> list[str]:
         if v is None:
@@ -65,6 +70,8 @@ def show_diff(before: Any, after: Any, before_label: str = "managed", after_labe
         _to_lines(before), _to_lines(after),
         fromfile=before_label, tofile=after_label,
     ):
+        if not show_header and (line.startswith("--- ") or line.startswith("+++ ")):
+            continue
         if color:
             if line.startswith("+") and not line.startswith("+++"):
                 sys.stdout.write(f"  {_GREEN}{line}{_RESET}")
@@ -84,9 +91,6 @@ def _context_subtree(doc: Any, path: PathSegments) -> Any:
     For path = ("preferences", "theme"):
       - navigates to doc["preferences"]
       - wraps result as {"preferences": <preferences dict>}
-
-    This shows the unknown value in its surrounding context rather than in
-    isolation, matching the cz_partial _subtree_at() approach.
     """
     parent = path[:-1]
     subtree: Any = doc
@@ -108,22 +112,23 @@ def ask_unknown_path(
     path: PathSegments,
     value: Any,
     target_doc: Any,
-    desired_doc: Any,
     hostname: str,
 ) -> str:
     """Display an unknown path in context and prompt for a decision.
 
-    Shows a diff of the parent subtree: desired (managed) → target.
-    The unknown path appears green as an addition.
+    Diffs target-without-key → target so only the unknown key appears
+    green (+) in its surrounding context. No other keys are highlighted.
 
     Returns 'g' (global), 'l' (local), or 'i' (ignore).
     Raises Abort or _Skip.
     """
     pointer = to_pointer(path)
     print(f"\n  Unknown: {pointer}")
+    target_without = delete_at(target_doc, path)
     show_diff(
-        _context_subtree(desired_doc, path),
+        _context_subtree(target_without, path),
         _context_subtree(target_doc, path),
+        show_header=False,
     )
     print()
     print(f"  [g] adopt globally  — managed_global.json (all machines)")
@@ -159,11 +164,9 @@ def build_adopt_callback(config: ConfigTarget, pm, hostname: str) -> AdoptCallba
     On skip:     returns None (engine records path as still unknown).
     On abort:    raises Abort (propagates up through engine and CLI).
     """
-    desired_doc = smart_merge(config.global_doc, config.local_doc)
-
     def callback(path: PathSegments, current_value: Any, target_doc: Any) -> Resolution | None:
         try:
-            choice = ask_unknown_path(path, current_value, target_doc, desired_doc, hostname)
+            choice = ask_unknown_path(path, current_value, target_doc, hostname)
         except _Skip:
             return None
 
