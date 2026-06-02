@@ -203,6 +203,53 @@ The engine does not change. `chain.resolve(path, target_doc)` returns a
 
 ---
 
+## Interactive handling of arrays — known limitations
+
+Phase 2B offers "recurse into first element" for unknown arrays of objects.
+This is a deliberate approximation; a fully correct design requires the
+Transforms work to be completed first.
+
+### What works today
+
+When some fields of an array's elements are already classified (e.g. via
+`$.array[*].field` in `ignored_paths`), custody auto-recurses into the first
+element and presents only unclassified fields. Fields ignored via `[*]`
+expressions are silently skipped; `installPath` (unclassified) surfaces as
+an unknown.
+
+### Known gaps
+
+**Expression scope is not verified.** `_has_any_classified_descendant` checks
+whether *any* path in the first element is classified, without confirming that
+the expression covers *all* elements via `[*]`. A positional expression like
+`/array/0/field` (index 0 only) triggers the same auto-recurse, silently
+missing elements 1…n. No warning is issued.
+
+**Transforms are not considered.** Once `TransformHandler` is implemented,
+a transform on `$.array[*].executablePath` classifies that field as WRITE-owned.
+The auto-recurse logic would handle this correctly by accident, but the
+interaction between transforms, adoption, and array-element unknowns has not
+been designed.
+
+**First-element assumption.** Interactive handling only inspects `element[0]`.
+If elements have heterogeneous schemas (different keys), fields absent from the
+first element are never surfaced.
+
+**Adopt is blocked at element-field level.** Adopt globally/locally is not
+offered for fields reached via array-element recursion because `_nested_set`
+in `config.py` does not handle list indices. Element-level management requires
+`x-merge-key` in `schema.json` and manual population of `managed_global.json`.
+
+### Revisit trigger
+
+This section should be revisited when `TransformHandler` is designed. The
+correct model likely requires:
+- Knowing whether the array has an `x-merge-key` (schema.json)
+- Verifying that classification expressions use `[*]` (not positional indices)
+- Deciding how transforms interact with the "unknown" concept for array elements
+
+---
+
 ## Schema — three roles
 
 `schema.json` is a JSON Schema (draft 7) stored in the config subdir.
