@@ -37,19 +37,29 @@ indices. The library's semantics would be actively misleading here.
 `jsonpath-ng` is used instead for JSON Path evaluation, which is where
 array-index paths actually appear (in `expressions.py` results).
 
-### Atomic arrays
+### Arrays: two layers, two semantics
 
-`walk()` and `leaf_paths()` in `segments.py` stop recursing when they hit a
-list. Arrays are yielded as atomic leaf values.
+Arrays are handled differently depending on which layer is involved:
 
-This is deliberate: ownership is declared in managed JSON documents whose
-structure mirrors the target. When you put a list in `managed_global.json`,
-you are declaring ownership of that entire list. Individual element ownership
-is a separate concern handled via merge keys and JSON Path expressions.
+**Path traversal layer (`segments.py`):** `walk()` and `leaf_paths()` stop
+at lists and yield them as atomic values. This reflects how managed docs work:
+when you include a list in `managed_global.json`, you are declaring ownership
+of that entire list. The path traversal layer does not need to look inside.
 
-The atomic assumption *does* break for array-of-objects with `x-merge-key`
-(see `merge.py: merge_by_key`), but that is handled at the merge layer, not
-in the path traversal layer. The two concerns stay separate.
+**Merge layer (`merge.py`):** `merge_by_key()` does recurse into arrays —
+matching elements by an identity field (`x-merge-key` from `schema.json`).
+This is a separate concern from path traversal: the engine asks "does this
+path exist in the managed doc?" (path layer, atomic), and separately "how
+do we merge the two array values?" (merge layer, element-aware).
+
+**Expression layer (`expressions.py`):** JSON Path expressions in
+`ignored_paths` can return paths with integer array indices
+(e.g. `("plugins", 0, "name")`). These paths are valid `PathSegments` and
+work correctly with `is_prefix` matching — the path traversal layer's atomic
+assumption does not apply here.
+
+The three layers stay decoupled. Adding element-level ownership for a new
+array only requires a merge key in `schema.json`, not changes to traversal.
 
 ---
 
@@ -132,9 +142,9 @@ Both return a `set[PathSegments]`. JSON Pointer always returns a singleton set
 (one concrete path); JSON Path may return many.
 
 **Why not always JSON Path?**
-JSON Pointer is the established syntax for `ignored_paths` in the predecessor
-tool (`cz_partial_sync`) and is simpler to write for simple cases. Both are
-supported; users choose per expression. No migration needed.
+JSON Pointer is simpler to write for the common case of ignoring a top-level
+key or a simple nested path. JSON Path adds value when filter expressions are
+needed. Both are supported; users choose per expression.
 
 **Why `jsonpath-ng` and not `jsonpointer`?**
 `jsonpath-ng` is required anyway for JSON Path filter expressions
@@ -328,16 +338,12 @@ contains the decoded structure. On save, the adapter re-encodes to Binary Plist.
 
 ## chezmoi decoupling
 
-The predecessor (`cz_partial_sync`) writes every change to two locations:
-the deployed config file *and* the chezmoi source directory (`.tmpl` files).
-This was a deliberate tight coupling to ensure chezmoi's source stays in sync.
-
-custody writes only to the deployed target. chezmoi integration is opt-in:
+custody writes only to the deployed target file. chezmoi integration is opt-in:
 
 ```sh
 # run_onchange_after_custody.sh.tmpl
 custody sync
 ```
 
-This reversal (chezmoi triggers custody rather than custody writing into
-chezmoi) eliminates the coupling while keeping the workflow intact.
+chezmoi triggers custody (rather than custody writing into chezmoi). This keeps
+custody chezmoi-agnostic — it works the same whether chezmoi is present or not.

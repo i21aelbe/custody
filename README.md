@@ -4,7 +4,7 @@
 
 ## The problem
 
-Tools like Sidebar, Claude Desktop, and VS Code write their own config files. A dotfile manager like chezmoi cannot fully manage these files without overwriting values the app sets itself. custody solves this: you declare which JSON paths are *yours*, the rest belongs to the app.
+Many apps write their own config files at runtime. A dotfile manager like chezmoi cannot fully manage these files without overwriting values the app sets itself. custody solves this: you declare which JSON paths are *yours*, the rest belongs to the app.
 
 ```
 ~/.config/custody/claude-desktop/
