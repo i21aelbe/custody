@@ -26,8 +26,7 @@ One directory per managed config file:
   managed_<host>.json # custody-owned subset, this machine (optional)
   ignored_paths       # one path expression per line; # comments allowed
   adapter             # format: "json", "plist", "yaml", ... (optional, default: json)
-  pre_sync.sh         # hook executed before sync (optional, executable)
-  post_sync.sh        # hook executed after sync (optional, executable)
+  customize.py        # plugins for this config (optional, see Plugins)
   schema.json         # JSON Schema for the target (optional, generated)
   .pending            # deferred unknown paths (runtime, not committed)
 ```
@@ -169,22 +168,37 @@ When an app changes its config format, the pre-sync schema check will fail.
 Running `custody migrate <name>` compares the old schema against a freshly
 generated one and proposes concrete changes to managed docs and `ignored_paths`.
 
-## Hooks
+## Plugins and hooks
 
-`pre_sync.sh` and `post_sync.sh` are executable shell scripts placed in the
-config subdir. They run before and after the sync respectively.
+App lifecycle (quit before sync, restart after) and other side effects are
+implemented as plugins using the [pluggy](https://pluggy.readthedocs.io/)
+hook framework. A plugin is a Python class with hook implementations.
 
-Typical use case: apps that read config only at startup and write their full
-in-memory state back on quit. The pre hook quits the app; the post hook
-restarts it.
+Place a `customize.py` file in the config subdir (per-config) or in
+`~/.config/custody/` (global, active for every sync):
 
-```sh
-# pre_sync.sh
-your-app --quit && sleep 2
-
-# post_sync.sh
-open -a YourApp
+```python
+# ~/.config/custody/sidebar/customize.py
+from sidebar_plugin import SidebarPlugin
+plugins = [SidebarPlugin()]
 ```
+
+```python
+# SidebarPlugin — quit before sync, restart after
+from custody.hooks import hookimpl
+
+class SidebarPlugin:
+    @hookimpl(wrapper=True)
+    def custody_sync(self, config_name, target_path):
+        app_quit()
+        try:
+            yield          # runs the actual sync
+        finally:
+            app_start()
+```
+
+See `docs/examples/plugins/` for complete examples including chezmoi
+write-back. See `docs/architecture.md` for the full plugin system design.
 
 ## chezmoi integration (optional)
 

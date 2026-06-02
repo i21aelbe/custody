@@ -93,26 +93,20 @@ These are not reliable as "physically connected to this machine."
   managed_memac.json  # sidebarStyle entries for monitors on this machine
   ignored_paths       # sidebarSettings, applicationStatistics, NSWindow Frame *, ...
   schema.json         # x-merge-key: bundleId, displayId
-  pre_sync.sh         # quit Sidebar, wait for write-back
-  post_sync.sh        # restart Sidebar
+  customize.py        # SidebarPlugin — quit before sync, restart after
 ```
 
-## Hooks
+## Plugin
 
-```sh
-#!/bin/sh
-# pre_sync.sh — quit Sidebar and wait for it to finish writing its state back
-osascript -e 'tell application "Sidebar" to quit'
-# Poll until the process is gone (max ~10s)
-for i in $(seq 1 10); do
-    pgrep -x "Sidebar" > /dev/null || break
-    sleep 1
-done
-sleep 1  # extra buffer for the final plist write
+App lifecycle is handled via a `customize.py` plugin (see
+`docs/examples/plugins/sidebar_plugin.py` for the full implementation):
+
+```python
+# ~/.config/custody/sidebar/customize.py
+from sidebar_plugin import SidebarPlugin
+plugins = [SidebarPlugin()]
 ```
 
-```sh
-#!/bin/sh
-# post_sync.sh — restart Sidebar
-open -a Sidebar
-```
+`SidebarPlugin` uses `@hookimpl(wrapper=True)` on `custody_sync` to quit
+Sidebar before the sync and restart it afterwards, waiting for the final
+plist write-back before yielding control to the engine.
