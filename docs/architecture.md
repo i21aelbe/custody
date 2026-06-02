@@ -336,6 +336,92 @@ contains the decoded structure. On save, the adapter re-encodes to Binary Plist.
 
 ---
 
+## Plugin system
+
+### Why pluggy
+
+custody uses [pluggy](https://pluggy.readthedocs.io/) — the same hook framework
+that powers pytest, tox, and devpi. It is small (~1k lines, no dependencies)
+and provides exactly what is needed: hook specifications with multiple
+implementations, wrapper hooks for setup/teardown, and ordered execution via
+`tryfirst`/`trylast`.
+
+**Rejected alternatives:**
+- Shell scripts (`pre_sync.sh` / `post_sync.sh`) — cannot pass Python objects,
+  cannot participate in the adoption lifecycle, no ordering guarantees across
+  multiple scripts.
+- String-based plugin declarations (`plugins` text file, one name per line) —
+  cannot express constructor arguments (e.g. `ChezmoidPlugin.from_chezmoi_data()`),
+  requires a separate plugin registry mechanism. Python code is sufficient.
+- Numeric priority integers — pluggy's `tryfirst`/`trylast` combined with
+  registration order covers all practical cases. A numeric system would add
+  complexity without solving a real problem.
+
+### Hook specifications
+
+```python
+custody_sync(config_name, target_path)          # wrapper — app lifecycle
+after_managed_file_written(config_name, file_path, scope)  # write-back
+after_target_written(config_name, target_path)  # post-write notification
+```
+
+`custody_sync` is a wrapper hook: the core sync logic is itself a hookimpl, so
+plugins can surround it with setup/teardown via `yield`:
+
+```python
+@hookimpl(wrapper=True)
+def custody_sync(self, config_name, target_path):
+    app_quit()
+    try:
+        yield          # runs the sync (and any inner wrappers)
+    finally:
+        app_start()
+```
+
+### Two-level registration
+
+Plugins are declared in plain Python files that define a `plugins` list:
+
+```
+~/.config/custody/customize.py          # global — active for every config
+~/.config/custody/<name>/customize.py   # scoped — active only for that sync
+```
+
+The CLI registers global plugins once at startup, then wraps each config's sync
+with its per-dir plugins via `scoped_plugins()` (a context manager that
+registers on enter and unregisters on exit). This means a `SidebarPlugin` in
+`sidebar/customize.py` never fires for `claude_desktop_config` — no `config_name`
+guard needed inside the plugin.
+
+**Ordering across levels:** per-dir plugins are registered after global plugins,
+so they are outermost by default (LIFO). To pin a plugin's position regardless
+of registration order, use `@hookimpl(wrapper=True, tryfirst=True)` (outermost)
+or `trylast=True` (innermost).
+
+**Installable plugins** (PyPI packages) register via entry points instead of
+`customize.py`:
+
+```toml
+[project.entry-points."custody"]
+chezmoi = "custody_chezmoi:ChezmoidPlugin"
+```
+
+### chezmoi write-back
+
+`ChezmoidPlugin` (a separate package, not part of custody core) implements
+`after_managed_file_written` and writes managed files back to the chezmoi source
+directory with template variable substitution:
+
+```
+deployed:  "/Users/michael/code/zk-prj"
+source:    "{{ .chezmoi.homeDir }}/code/zk-prj"
+```
+
+Substitution map is built once from `chezmoi data --format=json`. custody core
+has no chezmoi knowledge.
+
+---
+
 ## chezmoi decoupling
 
 custody writes only to the deployed target file. chezmoi integration is opt-in:
