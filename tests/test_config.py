@@ -129,3 +129,21 @@ class TestFindConfigs:
         make_config_dir(tmp_path, name="aaa")
         configs = find_configs(tmp_path, hostname="h")
         assert [c.name for c in configs] == ["aaa", "zzz"]
+
+
+class TestWriteIgnored:
+    def test_plain_path_writes_pointer(self, tmp_path):
+        from custody.config import write_ignored, ConfigTarget
+        d = make_config_dir(tmp_path, name="app")
+        cfg = ConfigTarget.from_dir(d, hostname="h")
+        write_ignored(cfg, ("preferences", "theme"))
+        assert "/preferences/theme" in (d / "ignored_paths").read_text()
+
+    def test_array_elem_path_writes_jsonpath(self, tmp_path):
+        from custody.config import write_ignored, ConfigTarget
+        d = make_config_dir(tmp_path, name="app")
+        cfg = ConfigTarget.from_dir(d, hostname="h")
+        write_ignored(cfg, ("items", 0, "lastLaunchDate"))
+        content = (d / "ignored_paths").read_text()
+        assert "$.items[*].lastLaunchDate" in content
+        assert "/items/0/lastLaunchDate" not in content

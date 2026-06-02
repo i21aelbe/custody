@@ -134,8 +134,35 @@ def _classify_doc(
                 target = _classify_doc(
                     value, path, target, chain, adopt_callback, unknown
                 )
+
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            # Non-empty list of dicts.
+            # If any field in the first element is already classified (e.g. via
+            # $.array[*].field in ignored_paths), auto-recurse — don't ask again.
+            first_elem_has_classified = _has_any_classified_descendant(
+                value[0], path + (0,), target, chain
+            )
+            if first_elem_has_classified:
+                target = _classify_doc(
+                    value[0], path + (0,), target, chain, adopt_callback, unknown
+                )
+            elif adopt_callback is not None:
+                # Entirely unknown and interactive: ask user
+                resolution = adopt_callback(path, value, target)
+                if resolution is None:
+                    unknown.append(path)
+                elif resolution.kind == SourceKind.WRITE:
+                    target = set_at(target, path, resolution.desired)
+                elif resolution.kind == SourceKind.RECURSE:
+                    target = _classify_doc(
+                        value[0], path + (0,), target, chain, adopt_callback, unknown
+                    )
+                # PASSTHROUGH: ignored, not unknown
+            else:
+                unknown.append(path)  # non-interactive: atomic unknown
+
         else:
-            # Leaf: scalar, list, or empty dict
+            # Leaf: scalar, empty list, list of non-dicts, empty dict
             if adopt_callback is None:
                 unknown.append(path)
             else:

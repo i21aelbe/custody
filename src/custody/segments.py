@@ -36,6 +36,22 @@ def to_pointer(segments: PathSegments) -> str:
     return "/" + "/".join(str(s).replace("~", "~0").replace("/", "~1") for s in segments)
 
 
+def to_jsonpath_wildcard(segments: PathSegments) -> str:
+    """Convert a path with integer segments to a JSON Path [*] expression.
+
+    Integer segments (array indices) become [*] wildcards:
+      ("foo", 0, "bar") → "$.foo[*].bar"
+      ("foo", "bar")    → "$.foo.bar"
+    """
+    parts = ["$"]
+    for seg in segments:
+        if isinstance(seg, int):
+            parts.append("[*]")
+        else:
+            parts.append(f".{seg}")
+    return "".join(parts)
+
+
 def is_prefix(prefix: PathSegments, path: PathSegments) -> bool:
     """Return True if prefix is a prefix of (or equal to) path.
 

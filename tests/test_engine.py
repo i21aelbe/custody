@@ -210,6 +210,81 @@ class TestPhase2BDict:
         assert ("config", "a") not in unknown
 
 
+class TestPhase2BList:
+    """Phase 2B behaviour for list-of-dicts paths."""
+
+    def test_list_of_dicts_presented_to_callback(self):
+        target = {"items": [{"a": 1}, {"a": 2}]}
+        chain = make_chain({}, target=target)
+        seen = []
+
+        def callback(path, value, target_doc):
+            seen.append(path)
+            return None
+
+        run_phase_2b(target, chain, callback)
+        assert ("items",) in seen
+
+    def test_recurse_walks_first_element(self):
+        target = {"items": [{"a": 1, "b": 2}]}
+        chain = make_chain({}, target=target)
+
+        def callback(path, value, target_doc):
+            if path == ("items",):
+                return Resolution(SourceKind.RECURSE, value, "recurse")
+            return None
+
+        _, unknown = run_phase_2b(target, chain, callback)
+        assert ("items", 0, "a") in unknown
+        assert ("items", 0, "b") in unknown
+        assert ("items",) not in unknown
+
+    def test_defer_list_records_list_path(self):
+        target = {"items": [{"a": 1}]}
+        chain = make_chain({}, target=target)
+        _, unknown = run_phase_2b(target, chain, lambda p, v, t: None)
+        assert ("items",) in unknown
+        assert ("items", 0, "a") not in unknown
+
+    def test_noninteractive_list_as_atomic_unknown(self):
+        target = {"items": [{"a": 1}, {"a": 2}]}
+        chain = make_chain({}, target=target)
+        _, unknown = run_phase_2b(target, chain, adopt_callback=None)
+        assert ("items",) in unknown
+        assert ("items", 0, "a") not in unknown
+
+    def test_partially_classified_list_recurses_automatically(self):
+        # Some fields already in ignored_paths → auto-recurse, don't ask user
+        target = {"items": [{"id": "x", "name": "X", "runtimeData": "y"}]}
+        # "id" is classified as ignored
+        chain = make_chain({}, ignored_exprs=["$.items[*].id"], target=target)
+        seen = []
+
+        def callback(path, value, target_doc):
+            seen.append(path)
+            return None
+
+        run_phase_2b(target, chain, callback)
+        assert ("items",) not in seen          # not presented as a whole
+        assert ("items", 0, "name") in seen    # unclassified leaf IS presented
+        assert ("items", 0, "id") not in seen  # already ignored, not presented
+
+    def test_plain_list_not_recurse_offered(self):
+        # list of scalars stays atomic, not offered as recurse
+        target = {"tags": ["foo", "bar"]}
+        chain = make_chain({}, target=target)
+        seen = []
+
+        def callback(path, value, target_doc):
+            seen.append((path, value))
+            return None
+
+        run_phase_2b(target, chain, callback)
+        assert ("tags",) in [p for p, _ in seen]
+        # value should be the full list, not individual elements
+        assert any(v == ["foo", "bar"] for _, v in seen if _ == ("tags",))
+
+
 class TestPhase1:
     def test_inserts_missing_key(self):
         target = {"other": "x"}

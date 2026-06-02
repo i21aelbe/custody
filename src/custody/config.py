@@ -99,14 +99,25 @@ def write_managed(
 
 
 def write_ignored(config: ConfigTarget, path: PathSegments) -> None:
-    """Append a JSON Pointer to the ignored_paths file."""
-    from custody.segments import to_pointer
-    pointer = to_pointer(path)
+    """Append an expression to the ignored_paths file.
+
+    Paths with integer segments (array indices) are written as JSON Path
+    expressions with [*] wildcards so they match all elements, not just
+    the positional index used during discovery:
+      ("applicationConfigurations", 0, "lastLaunchDate")
+        → $.applicationConfigurations[*].lastLaunchDate
+    Plain paths are written as JSON Pointers.
+    """
+    from custody.segments import to_jsonpath_wildcard, to_pointer
+    if any(isinstance(s, int) for s in path):
+        expr = to_jsonpath_wildcard(path)
+    else:
+        expr = to_pointer(path)
     ignored_file = config.config_dir / "ignored_paths"
     existing = ignored_file.read_text() if ignored_file.exists() else ""
     if existing and not existing.endswith("\n"):
         existing += "\n"
-    ignored_file.write_text(existing + pointer + "\n")
+    ignored_file.write_text(existing + expr + "\n")
 
 
 def write_pending(config: ConfigTarget, unknown: list[PathSegments]) -> None:

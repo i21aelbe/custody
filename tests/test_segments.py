@@ -7,6 +7,7 @@ from custody.segments import (
     leaf_paths,
     parse_pointer,
     set_at,
+    to_jsonpath_wildcard,
     to_pointer,
     walk,
 )
@@ -200,3 +201,20 @@ class TestLeafPaths:
     def test_mixed(self):
         doc = {"a": 1, "b": {"c": [1, 2]}}
         assert set(leaf_paths(doc)) == {("a",), ("b", "c")}
+
+
+class TestToJsonpathWildcard:
+    def test_plain_path(self):
+        assert to_jsonpath_wildcard(("foo", "bar")) == "$.foo.bar"
+
+    def test_single_key(self):
+        assert to_jsonpath_wildcard(("foo",)) == "$.foo"
+
+    def test_with_array_index(self):
+        assert to_jsonpath_wildcard(("foo", 0, "bar")) == "$.foo[*].bar"
+
+    def test_nested_array_indices(self):
+        assert to_jsonpath_wildcard(("a", 0, "b", 1, "c")) == "$.a[*].b[*].c"
+
+    def test_root(self):
+        assert to_jsonpath_wildcard(()) == "$"

@@ -15,7 +15,7 @@ from typing import Any
 from custody.config import ConfigTarget, write_ignored, write_managed
 from custody.engine import AdoptCallback
 from custody.ownership import Resolution, SourceKind
-from custody.segments import PathSegments, delete_at, get_at, to_pointer
+from custody.segments import PathSegments, delete_at, get_at, to_jsonpath_wildcard, to_pointer
 
 
 class Abort(Exception):
@@ -109,6 +109,16 @@ def _context_subtree(doc: Any, path: PathSegments) -> Any:
     return result
 
 
+def _split_at_last_int(path: PathSegments) -> tuple[PathSegments, PathSegments]:
+    """Split path at the last integer segment (array index).
+
+    ("items", 0, "name") → (("items", 0), ("name",))
+    Used to navigate to the array element and then work on the field within it.
+    """
+    last_int = max(i for i, s in enumerate(path) if isinstance(s, int))
+    return path[: last_int + 1], path[last_int + 1:]
+
+
 # ---------------------------------------------------------------------------
 # Interactive dialog
 # ---------------------------------------------------------------------------
@@ -121,39 +131,68 @@ def ask_unknown_path(
 ) -> str:
     """Display an unknown path in context and prompt for a decision.
 
-    Diffs target-without-key → target so only the unknown key appears
-    green (+) in its surrounding context. No other keys are highlighted.
+    For plain paths: diffs target-without-key → target (only the unknown
+    key appears green). For list-of-dicts: shows first element as sample.
+    For paths through array indices (int segment): shows value directly
+    and offers only ignore (adopt is not supported at element-field level).
 
-    For dict-valued paths, also offers [4] recurse to decide on sub-keys.
-    Returns '1' (global), '2' (local), '3' (ignore), or '4' (recurse).
+    Returns '1' (global), '2' (local), '3' (ignore), or 'r' (recurse).
     Raises Abort or _Skip.
     """
     is_subdict = isinstance(value, dict) and bool(value)
-    pointer = to_pointer(path)
+    is_list_of_dicts = (
+        isinstance(value, list) and bool(value) and isinstance(value[0], dict)
+    )
+    is_array_elem = any(isinstance(s, int) for s in path)
+
+    display_path = to_jsonpath_wildcard(path) if is_array_elem else to_pointer(path)
     if _supports_color():
-        header = f"  {_BOLD}{_YELLOW}Unknown:{_RESET} {_BOLD}{pointer}{_RESET}"
+        header = f"  {_BOLD}{_YELLOW}Unknown:{_RESET} {_BOLD}{display_path}{_RESET}"
     else:
-        header = f"  Unknown: {pointer}"
+        header = f"  Unknown: {display_path}"
     print(f"\n{header}")
     print()
-    target_without = delete_at(target_doc, path)
-    show_diff(
-        _context_subtree(target_without, path),
-        _context_subtree(target_doc, path),
-        show_header=False,
-    )
+
+    if is_array_elem:
+        array_path, field_path = _split_at_last_int(path)
+        first_elem = get_at(target_doc, array_path)
+        elem_without = delete_at(first_elem, field_path)
+        show_diff(
+            _context_subtree(elem_without, field_path),
+            _context_subtree(first_elem, field_path),
+            show_header=False,
+        )
+    elif is_list_of_dicts:
+        print(f"  [list of {len(value)} objects — first element:]")
+        show_diff(None, value[0], show_header=False)
+    else:
+        target_without = delete_at(target_doc, path)
+        show_diff(
+            _context_subtree(target_without, path),
+            _context_subtree(target_doc, path),
+            show_header=False,
+        )
+
     print()
     print()
-    print(f"  [1] adopt globally  — managed_global.json (all machines)")
-    print(f"  [2] adopt locally   — managed_{hostname}.json (this machine)")
+    if not is_array_elem:
+        print(f"  [1] adopt globally  — managed_global.json (all machines)")
+        print(f"  [2] adopt locally   — managed_{hostname}.json (this machine)")
     print( "  [3] ignore          — add to ignored_paths (app-owned)")
     print()
-    if is_subdict:
+    if is_list_of_dicts:
+        print("  [r] recurse into first element — discover per-element fields")
+    elif is_subdict:
         print("  [r] recurse         — decide on sub-keys individually")
     print( "  [s] skip            — ask again next run")
     print( "  [a] abort           — stop sync")
 
-    valid = ("1", "2", "3", "r") if is_subdict else ("1", "2", "3")
+    if is_array_elem:
+        valid = ("3", "r") if is_subdict else ("3",)
+    elif is_subdict or is_list_of_dicts:
+        valid = ("1", "2", "3", "r")
+    else:
+        valid = ("1", "2", "3")
     print(f"\n  [{'/'.join(valid)}/s/a]: ", end="", flush=True)
     while True:
         ch = getch().lower()
